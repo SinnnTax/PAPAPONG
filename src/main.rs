@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use std::collections::VecDeque;
 
 const WINDOW_W: f32 = 800.0;
 const WINDOW_H: f32 = 600.0;
@@ -63,6 +64,13 @@ impl Difficulty {
             Difficulty::Hard => (450.0, 5.0),
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct Snapshot {
+    left_rect: Rect,
+    right_rect: Rect,
+    ball_rect: Rect,
 }
 
 struct Paddle<'a> {
@@ -359,6 +367,10 @@ enum GameState {
     DifficultySelect {
         selected: usize,
     },
+    Replay {
+        frame_index: usize,
+        step_timer: u32,
+    },
 }
 
 impl Score {
@@ -420,6 +432,7 @@ async fn main() {
     let mut floating_ability: Option<Ability> = None;
     let mut active_effect: Option<ActiveEffect> = None;
     let mut extra_balls: Vec<Ball> = Vec::new();
+    let mut recording_buffer: VecDeque<Snapshot> = VecDeque::with_capacity(180);
 
     loop {
         let dt = get_frame_time();
@@ -534,6 +547,7 @@ async fn main() {
                 }
 
                 if in_game && is_key_pressed(KeyCode::Enter) {
+                    recording_buffer.clear();
                     game_state = GameState::Menu { selected: 0 };
                 }
             }
@@ -761,7 +775,7 @@ async fn main() {
                             winner = "Right player wins!";
                             game_state = GameState::GameOver;
                         } else {
-                            game_state = GameState::Countdown { timer: 3.0 };
+                            game_state = GameState::Replay { frame_index: 0, step_timer: 0 };
                         }
                     }
                     ScoreResult::RightScored => {
@@ -779,7 +793,7 @@ async fn main() {
                             winner = "Right player wins!";
                             game_state = GameState::GameOver;
                         } else {
-                            game_state = GameState::Countdown { timer: 3.0 };
+                            game_state = GameState::Replay { frame_index: 0, step_timer: 0 };
                         }
                     }
                     ScoreResult::None => {}
@@ -789,6 +803,16 @@ async fn main() {
                 right.draw();
                 ball.draw();
                 score.draw();
+
+                if recording_buffer.len() >= 180 {
+                    recording_buffer.pop_front();
+                }
+
+                recording_buffer.push_back(Snapshot {
+                    left_rect: left.rect,
+                    right_rect: right.rect,
+                    ball_rect: ball.rect,
+                });
             }
             GameState::GameOver => {
                 let dims = measure_text(winner, None, 48, 1.0);
@@ -805,6 +829,7 @@ async fn main() {
                 );
 
                 if is_key_pressed(KeyCode::Enter) {
+                    recording_buffer.clear();
                     game_state = GameState::Menu { selected: 0 };
                 }
             }
@@ -911,6 +936,49 @@ async fn main() {
 
                 if is_key_pressed(KeyCode::Escape) {
                     game_state = GameState::Menu { selected: 0 };
+                }
+            }
+            GameState::Replay { ref mut frame_index, ref mut step_timer } => {
+                clear_background(BLACK);
+                draw_centre_line();
+
+                let text = "REPLAY";
+                let dims = measure_text(text, None, 60, 1.0);
+                draw_text(text, WINDOW_W / 2.0 - dims.width / 2.0, 100.0, 60.0, YELLOW);
+
+                if *frame_index < recording_buffer.len() {
+                    let snapshot = &recording_buffer[*frame_index];
+
+                    draw_rectangle(
+                        snapshot.left_rect.x,
+                        snapshot.left_rect.y,
+                        snapshot.left_rect.w,
+                        snapshot.left_rect.h,
+                        LIGHTGRAY
+                    );
+                    draw_rectangle(
+                        snapshot.right_rect.x,
+                        snapshot.right_rect.y,
+                        snapshot.right_rect.w,
+                        snapshot.right_rect.h,
+                        LIGHTGRAY
+                    );
+                    draw_rectangle(
+                        snapshot.ball_rect.x,
+                        snapshot.ball_rect.y,
+                        snapshot.ball_rect.w,
+                        snapshot.ball_rect.h,
+                        WHITE
+                    );
+
+                    *step_timer += 1;
+                    if *step_timer >= 3 {
+                        *frame_index += 1;
+                        *step_timer = 0;
+                    }
+                } else {
+                    recording_buffer.clear();
+                    game_state = GameState::Countdown { timer: 3.0 };
                 }
             }
         }
